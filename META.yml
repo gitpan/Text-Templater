@@ -1,0 +1,11 @@
+--- #YAML:1.0
+name: Text-Templater
+version: 1.3
+author: ~
+abstract: A template engine.
+license: perl
+provides:
+  Text::Templater:
+    file: lib/Text/Templater.pm
+    version: 1.3
+generated_by: Module::Build version 0.25

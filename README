@@ -1,25 +1,34 @@
 NAME
-    Templater - Parse data inside a template.
+    Templater - A template engine.
 
 SYNOPSIS
-       #!/usr/bin/perl
-       use Text::Templater;
-
-       my $tpl = new Text::Templater($tagname); 
-       #Default tagname is "tpl"
-
-       $tpl->setSource($some_template_text);
-
-       #Set the data source...
-       $tpl->setData({                
-          name => ['bob', undef, 'daniel'],
-          color => ['red', 'green', 'blue'],
-          });
-       #Or use existing objects.
-       $tpl->setData($cgi);           
-       $tpl->setData($sth);
-
-       print $tpl->parse();  #Get the result.
+      #!/usr/bin/perl
+      use Text::Templater;
+  
+      my $tpl = new Text::Templater($tagname);
+      #Default tagname is "tpl"
+  
+      $tpl->setSource($some_template_text);
+  
+      #Set the data source...
+      $tpl->setData({
+        name => ['bob', undef, 'daniel'],
+        color => ['red', 'green', 'blue'],
+        nested => 
+          [
+            {lang => ['fr'], numeric => ['un', 'deux', 'trois', 'quatre']},
+            {lang => ['en'], numeric => ['one', 'two', 'three', 'four']}
+          ]
+        });
+      #Or use existing objects.
+      $tpl->setData($cgi);
+      $tpl->setData($sth);
+  
+      #Get the result.
+      $result = $tpl->parse() || die $tpl->getError();
+   
+      #if you get weird stuff,
+      #check for $tpl->getWarnings();
 
 ABSTRACT
     The objective of the Templater object is to separate data manipulation
@@ -30,27 +39,29 @@ DESCRIPTION
     Templater receive the template and the data to be binded in the
     template. Then using the parse method, it return the result.
 
-    One tag and 5 properties are defined in a xmlish way to describe data in
-    the template. Internaly regular expressions are used instead of a xml
-    parser, so it can be used with any kind of text files. Still, you can
-    also use it in your xml while keeping their well-formedness and valitiy
-    of the document.
+    One tag and 5 properties are used in a xmlish way to describe data in
+    the template. Since the object use an xml tag, you can use it in your
+    xml files while keeping them well-formedness and valid.
 
     <tpl id="x" name="key" index="0" nullout="no" list="CONST:1,2,3..." />
 
   Tag properties
     id="unique"
-          You can specify the id of an element to make late reference to it.
+          You can specify the id of an element to make late references to it.
           This can be used for not breaking the well-formedness of a xml
-          document. You could write <tpl id="myvalue" name="nom" /> 
-          <othertag value="#myvalue" /> instead of 
-          <other-tag value="<tpl name="nom" />" />. 
-          Note that the second alternalive will work as well.
+          document. You could write <tpl id="myvalue" name="nom" />
+          <othertag value="#myvalue" /> instead of
+          <other-tag value="<tpl name="nom" />" />.
+          A tag with the id specified will not print his result, only
+          record it for late references. Note that the second alternalive 
+          will work as well.
 
     name="name"
           You can bind a specific data value to a tag using it's hash key.
           A tag without a name does not make sense.
           In the synopsis; <tpl name="color" /> eqals red.
+          If you have nested structures, you can use the notation a.b
+          <tpl name="nested.lang" /> equals fr.
 
     index="num"
           Specify the index of the value to be binded.
@@ -59,14 +70,13 @@ DESCRIPTION
 
     nullout="yes|no"
           If the binded value is undef or '', all the expression
-          is discarded. no is taken by default. In the synopsis: 
+          is discarded. no is taken by default. In the synopsis:
           <tpl name="name" nullout="yes">hi</tpl> equals nothing.
 
     list="CONST:1,2,3,..."
           Defines a specific constant "CONST" into the tag inner source.
           The value of CONST will alternativly be 1,2,3,1,2,etc
           The backslash is used as a dummy quote character.
-          But no, you can't \u or \b :-)
 
   Tag forms
     The templater tag can be written as: <tpl /> or <tpl></tpl>. The first
@@ -90,8 +100,18 @@ DESCRIPTION
         Takes the template and parse the data inside using the templater
         tags. The parsed template is returned.
 
+    getError
+        Returns the error that was recorded during the last parsing. This
+        method should return undef if parse return a value and the cause of
+        the error if parse says undef.
+
+    getWarnings
+        Returns the list of the warnings that occurned in the last parsing.
+        This is the first place to look if you think you have weird or
+        unexpected results.
+
 CREDITS
-    Mathieu Gagnon, (c) 2005
+    Mathieu Gagnon
 
     This package is free software; you can redistribute it and/or modify it
     under the same terms as Perl itself.

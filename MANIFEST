@@ -1,0 +1,17 @@
+Build.PL
+CHANGES
+MANIFEST			This list of files
+META.yml
+README
+lib/Text/Templater.pm
+t/1.errors.t
+t/2.warnings.t
+t/3.closed.t
+t/4.opened.t
+t/5.nested.t
+t/6.random.t
+t/common.pl
+t/templates/001.tpl
+t/templates/001.tpl.result
+t/templates/002.tpl
+t/templates/002.tpl.result
