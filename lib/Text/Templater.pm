@@ -1,3 +1,21 @@
+# Text::Templater - A template engine
+#
+# Copyright (C) 2003, 2004 by Mathieu Gagnon
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+
 package Text::Templater;
 use strict;
 use warnings;
@@ -5,17 +23,22 @@ use warnings;
 # And using the power of the enchanted hammer, Thor conjures up a long forgoten event...
 # "When something puzzles you, always seek the simplest, most obvious explanation ...no matter HOW impossible it may seem!"
 
-our $VERSION = 1.3;
+our $VERSION = '1.4';
 our @ISA     = ();
 
 sub new();
+sub _init();
 sub setSource($);
 sub setData($);
-sub getDataCGI($;);
-sub getDataSTH($;);
 sub getError();
+sub getErrorNo();
+sub getWarnings();
+sub getWarningsNo();
+sub _posInFile();
+sub _setError($;);
+sub _pushWarning($;);
 sub parse();
-sub _parse(;$$);
+sub _parse($;$);
 sub _roundNegativeIndex($$;);
 sub _getNextNode($;);
 sub _makeList($;);
@@ -27,43 +50,58 @@ sub _fetchAssociatedData($;);
 sub _cleanoff($;);
 sub hasValue($;);
 
-use constant ERR_NO_SOURCE          => 'Undefined value for template source';
-use constant ERR_UNMATCHED_CLOSING  => 'Unmatched closing tag';
-use constant WAR_UNMATCHED_OPENING  => 'Unmatched opening tag';
-use constant WAR_TAG_NO_NAME        => 'A tag with no name does not make sense';
-use constant WAR_MALFORMED_NULLOUT  => 'The nullout property should be yes or no';
-use constant WAR_MALFORMED_INDEX    => 'The index property can only have integer value';
-use constant WAR_UNDEFINED_LIST     => 'Undefined list element in list parsing';
-use constant WAR_MALFORMED_LIST     => 'List attribute malformed';
-use constant WAR_UNDEFINED_DATA     => 'Associated data not found';
+use constant ERR_NO_SOURCE           => {NO => 201, MSG => 'Undefined value for template source'};
+use constant ERR_UNMATCHED_CLOSING   => {NO => 202, MSG => 'Unmatched closing tag'};
+use constant ERR_MALFORMED_STRUCTURE => {NO => 203, MSG => 'Malformed data structure'};
+use constant WAR_UNMATCHED_OPENING   => {NO => 601, MSG => 'Unmatched opening tag'};
+use constant WAR_TAG_NO_NAME         => {NO => 602, MSG => 'A tag with no name does not make sense'};
+use constant WAR_MALFORMED_NULLOUT   => {NO => 603, MSG => 'The nullout property should be yes or no'};
+use constant WAR_MALFORMED_INDEX     => {NO => 604, MSG => 'The index property can only have integer value'};
+use constant WAR_UNDEFINED_LIST      => {NO => 605, MSG => 'Undefined list element in list parsing'};
+use constant WAR_MALFORMED_LIST      => {NO => 606, MSG => 'List attribute malformed'};
+use constant WAR_UNDEFINED_DATA      => {NO => 607, MSG => 'Associated data not found'};
+
+use constant STR_LN => ' at ln ';
+use constant STR_CO => ', co ';
+
 
 # Crée un objet templater qui pourra être utilisé après
 # avoir specifié la source et les données.
-# @param $tagname Nom du tag utilisé dans les templates,
-# par défaut la valeur est 'tpl'.
-# @return Une instance de la classe Templater.
 sub new()
 {
   my ($class, $tagname) = (shift, shift);
   my $self = {
-    TAGNAME    => "tpl",
+    TAGNAME    => 'tpl',
     source     => undef,
     data       => undef,
-    error      => undef, #Ce champs indique la cause si parse retourne undef.
-    warnings   => [],    #Avertissement. Ne cause pas la fin du parsing.
-    ids        => {},    #Valeurs enregistrées par la proprietée id.
-    idsbck     => {},    #Backup des ids pour les tags ouvert.
-    inxbck     => [],    #Stack des derniers index (pour les nested structs).
     index      => 0,     #Index par defaut des valeurs.
-    nullout    => "no",  #Valeurs par defaut du parametre nullout.
+    nullout    => 'no',  #Valeurs par defaut du parametre nullout.
     };
   $self->{TAGNAME} = $tagname if(hasValue $tagname);
-  return bless $self, $class;
+
+  bless $self, $class;
+  $self->_init();
+
+  return $self;
+}
+
+# Initialise proprement l'objet
+sub _init()
+{
+  my $self = shift;
+
+  $self->{error} = {'no' => undef, 'msg' => undef};  #Ce champs indique la cause si parse retourne undef.
+  $self->{warnings} = {'no' => [], 'msg' => []};     #Avertissement. Ne cause pas la fin du parsing.
+  $self->{ids} = {};           #Valeurs enregistrées par la proprietée id.
+  $self->{idsbck} = {};        #Backup des ids pour les tags ouvert.
+  $self->{inxbck} = [];        #Stack des derniers index (pour les nested structs).
+  $self->{posi} = [0];         #Variables utilisé pour le calculs de la ligne dans msg d'err.
+  $self->{posg} = [0];
+  $self->{lentag} = [0];
 }
 
 # Ajuste la source (le template) et retourne le resultat.
 # @param $source Le template à parser. (optionel)
-# @return Le template à parser.
 sub setSource($)
 {
   my $self = shift;
@@ -75,59 +113,16 @@ sub setSource($)
 
 # Ajuste les données (les information à mettre dans le template).
 # Les données doivent être une référence à un hash dont les
-# valeurs sont des référence sur un array {v1 => [0,1]} ou un
-# sous hash (une sous structure) (v1 => [{w1 => []}])
-# Si un objet CGI ou ST est passe, il est automatiquement convertie.
+# valeurs sont des référence sur des array {v1 => [0,1]} ou un
+# sous hash (une autre structure) (v1 => [{w1 => []}])
 # @param $data La source des données. (optionel)
-# @return La source des données.
 sub setData($)
 {
-  my ($self, $data) = (shift, {});
+  my $self = shift;
   if(@_){
-    $data = shift;
-
-    if(ref $data eq 'CGI'){
-      $data = $self->getDataCGI($data);
-    }
-    elsif(ref $data eq 'DBI::st'){
-      $data = $self->getDataSTH($data);
-    }
-    $self->{data} = $data;
+    $self->{data} = shift;
   }
   return $self->{data};
-}
-
-# Prend un objet CGI et le transforme dans le format
-# de données utilisé par Templater.
-# @param $cgi L'objet CGI
-# @return L'objet CGI convertie, undef en cas d'erreur.
-sub getDataCGI($;)
-{
-  my ($self, $cgi, $data) = (shift, shift, {});
-  return undef if(ref $cgi ne 'CGI');
-
-  foreach my $key ($cgi->param){
-    $data->{$key} = [$cgi->param($key)];
-  }
-  return $data;
-}
-
-# Prend un objet DBI::st et le transforme dans le format
-# de donnees utilise par Templater.
-# @param $sth L'objet DBI::st
-# @return L'objet DBI::st convertie, undef en cas d'erreur.
-sub getDataSTH($;)
-{
-  my ($self, $sth, $data) = (shift, shift, {});
-  my ($key, $ary);
-  return undef if(ref $sth ne 'DBI::st');
-
-  while($ary = $sth->fetchrow_hashref()){
-    foreach $key (keys %$ary){
-      push @{$data->{$key}}, $ary->{$key};
-    }
-  }
-  return $data;
 }
 
 # Obtiens l'erreur enregistré.
@@ -136,16 +131,69 @@ sub getDataSTH($;)
 sub getError()
 {
   my $self = shift;
-  return $self->{error};
+  return $self->{error}->{'msg'};
+}
+
+# Obtiens le numéro d'erreur enregistré.
+# @return Le numéro d'erreur ou undef si aucune erreur.
+sub getErrorNo()
+{
+  my $self = shift;
+  return $self->{error}->{'no'};
 }
 
 # Obtiens la liste des warnings.
-# Utiliser cette méthode si parse retourne un résultat incohérant.
-# @return La liste des avertissements intervenus.
 sub getWarnings()
 {
   my $self = shift;
-  return @{$self->{warnings}};
+  return @{$self->{warnings}->{'msg'}};
+}
+
+# Obtiens la liste des numéros de warnings.
+sub getWarningsNo()
+{
+  my $self = shift;
+  return @{$self->{warnings}->{'no'}};
+}
+
+# Formate la position de l'erreur pour être affichée
+# en ln n co n.
+sub _posInFile()
+{
+  my $self = shift;
+  my $pos = 0;
+  foreach $_ (@{$self->{posi}}){ $pos += $_; }
+  foreach $_ (@{$self->{posg}}){ $pos += $_; }
+  foreach $_ (@{$self->{lentag}}){ $pos += $_; }
+
+  my $source = defined $self->{source} ? $self->{source} : '';
+  my $region = substr $source, 0, $pos;
+  my $line = () = $region =~ m/(\n)/gs;
+  my $posline = rindex $region, "\n";
+
+  return STR_LN . ($line+1) . STR_CO . (length($region) - $posline);
+}
+
+# Enregistre une erreur
+sub _setError($;)
+{
+  my ($self, $err) = @_;
+  $self->{error}->{'no'} = $err->{'NO'};
+  $self->{error}->{'msg'} = 'Error: ' . $err->{'MSG'} . $self->_posInFile();
+}
+
+# Ajoute un warning à la liste.
+sub _pushWarning($;)
+{
+  my ($self, $err) = @_;
+  my $msg = 'Warning: ' . $err->{'MSG'} . $self->_posInFile();
+
+  if(map { $_ eq $msg } @{$self->{warnings}->{'msg'}}){
+    ;
+  }else{
+    push @{$self->{warnings}->{'no'}}, $err->{'NO'};
+    push @{$self->{warnings}->{'msg'}}, $msg;
+  }
 }
 
 # Front-end pour _parse.
@@ -155,38 +203,35 @@ sub parse()
 {
   my $self = shift;
   my $source;
-  $self->{ids} = {};
-  $self->{idsbck} = {};
-  $self->{inxbck} = [];
-  $self->{error} = undef;
-  $self->{warnings} = [];
+  $self->_init();
 
   $source = $self->_parse($self->{source});
   $source = $self->_replaceID($source);
   $source = $self->_cleanoff($source);
   
-  return (defined $self->{error}) ? undef : $source;
+  return (defined $self->{error}->{'no'}) ? undef : $source;
 }
 
 # Effectue un remplacement des tags <tpl> de la source
 # et retourne le resultat.
 # @param $source Source des données à parser.
 # @param $index Index à prendre par défault. (optionel)
-# @return Le résultat, undef en cas d'erreur.
-sub _parse(;$$)
+sub _parse($;$)
 {
   my ($self, $source) = (shift, shift);
   my $index = hasValue($_[0]) ? shift : $self->{index};
-  my $val = '';
-  my ($i, $data, %node);
+  my $replace = '';       #La valeur de remplacement
+  my ($i, $data, %node);  #for i; Data associé au remplacement; node (object)
   if(!defined $source){
-    $self->{error} = ERR_NO_SOURCE;
+    $self->_setError(ERR_NO_SOURCE);
     return undef;
   }
-  return $source if(defined $self->{error});
+  return $source if(defined $self->{error}->{'no'});
 
-  while((%node = $self->_getNextNode($source)) && hasValue $node{tag} && !defined $self->{error}){
-    if(hasValue $node{inner}){
+
+  while((%node = $self->_getNextNode($source)) && hasValue $node{tag} && !defined $self->{error}->{'no'}){
+
+    if(defined $node{inner}){
       $node{index} = $self->{index} if(!hasValue $node{index});
       $node{nullout} = $self->{nullout} if(!hasValue $node{nullout});
 
@@ -195,35 +240,45 @@ sub _parse(;$$)
       push @{$self->{inxbck}}, {name => $node{key}, index => $node{index}};
       $data = $self->_fetchAssociatedData(\%node);
       next if(!defined $data);
+      
+      push @{$self->{posi}}, 0;  #incrémente le buffer
+      push @{$self->{posg}}, 0;
+      
       $i = $self->_roundNegativeIndex($node{index}, scalar @$data);
 
-      # !defined $data || $i < scalar @$data  ..  what the fuck is that??
       for(my $inc_list = 0; $i < scalar @$data; $i++, $self->{inxbck}[-1]->{index}++){
+        $self->{posi}[-1] = 0;   #Remise à 0 pour ne pas interagire avec le reste
+        $self->{posg}[-1] = 0;
+
         $self->_recordID($node{id}, $$data[$i]);
         if($node{nullout} eq "no" || hasValue $$data[$i]){
-          $val .= $self->_parse($self->_replaceConst($node{inner}, $node{list}, $inc_list), $i);
+          $replace .= $self->_parse($self->_replaceConst($node{inner}, $node{list}, $inc_list), $i);
           $inc_list++;
         }
-        $val = $self->_replaceID($val);
+        $replace = $self->_replaceID($replace);
       }
+      pop @{$self->{posi}};      #décrémente le buffer
+      pop @{$self->{posg}};      #ce n'était que temporaire pour ne pas intéragir avec les autres valeurs.
+      pop @{$self->{lentag}};
       pop @{$self->{inxbck}};
     }
     else{
       $node{index} = $index if(!hasValue $node{index});
       $data = $self->_fetchAssociatedData(\%node);
-      next if(!defined $data);
+      $data = [] if(!defined $data);
 
       $i = $self->_roundNegativeIndex($node{index}, scalar @$data);
-      $val = $$data[$i];
+      $replace = $$data[$i];
       if(hasValue $node{id}){
-        $self->_recordID($node{id}, $val);
-        $val = '';   #La valeur pour un tag id ne doit pas etre imprimer.
+        $self->_recordID($node{id}, $replace);
+        $replace = '';   #La valeur pour un tag id ne doit pas etre imprimer.
       }
     }
   } continue{
-	  $val = '' if(!defined $val);
-    $source =~ s/\Q$node{tag}\E/$val/;
-    $val = '';
+	  $replace = '' if(!defined $replace);
+	  $self->{posi}[-1] += length($node{tag}) - length($replace);
+    $source =~ s/\Q$node{tag}\E/$replace/;
+    $replace = '';
   }
 
   return $source;
@@ -234,7 +289,6 @@ sub _parse(;$$)
 # Par example, une limite de -10 et un index de -12 donne 0.
 # @param $i Index
 # @param $length Limit
-# @return Valeur respectant la limite.
 sub _roundNegativeIndex($$;){
   my ($self, $i, $length) = (shift, shift, shift);
   $i = 0 if(!defined $i);
@@ -253,9 +307,19 @@ sub _getNextNode($;)
   my ($pos, $posend, $tag, $tagend, @list, %res);
   $source =~ m/(<\Q$self->{TAGNAME}\E[^>]*?>)/gs;
   ($res{tag}, $tag, $pos) = ($1, $1, pos($source));
-  return () if(!hasValue $res{tag});  #aucun tag trouvé
 
+  return () if(!hasValue $res{tag});  #aucun tag trouvé
+  $self->{posg}[-1] = $pos - length $res{tag};
+
+  #Test si des tags ferme existe avant notre ouvert
+  my $test = substr($source, 0, $self->{posg}[-1]);
+  while($test =~ m/(<\/\Q$self->{TAGNAME}\E[^>]*?>)/g){
+    $self->_pushWarning(WAR_UNMATCHED_OPENING);
+  }
+  
   if($tag !~ m/\/>$/){   #Tag avec du contenu..
+    push @{$self->{lentag}}, length $tag;
+
     ($posend, $tagend) = $self->_getPosEnd($source, pos($source));
     return () if(!defined $posend);   #Une erreur est servenue avec getPosEnd ..
 
@@ -267,16 +331,27 @@ sub _getNextNode($;)
   $res{id}      = $1 if($res{tag} =~ m/^<[^>]*?id="(.*?)"[^>]*?>/);
   $res{key}     = $1 if($res{tag} =~ m/^<[^>]*?name="(.*?)"[^>]*?>/);
   $res{nullout} = $1 if($res{tag} =~ m/^<[^>]*?nullout="(.*?)"[^>]*?>/);
-  $res{index}   = $1 if($res{tag} =~ m/^<[^>]*?index="(.*?)"[^>]*?>/);
+  if(defined $res{key} && $res{key} =~ m/^(.*)\[(.*)\]$/){
+    $res{key}   = $1;
+    $res{index} = $2;
+  }
+  else{
+    #Cette ligne est gardé simplement pour compatiblité avec les ancienne versions.
+    $res{index}   = $1 if($res{tag} =~ m/^<[^>]*?index="(.*?)"[^>]*?>/);
+  }
+
   push(@list, $1) while($tag =~ m/list="(.*?)"/g);
   %{$res{list}} = $self->_makeList(@list);
 
-	push @{$self->{warnings}}, WAR_TAG_NO_NAME
-		if(!hasValue $res{key});
-	push @{$self->{warnings}}, WAR_MALFORMED_NULLOUT
-		if(defined $res{nullout} && $res{nullout} ne 'yes' && $res{nullout} ne 'no');
+  if(!hasValue $res{key}){
+    $self->_pushWarning(WAR_TAG_NO_NAME);
+  }
+
+	$self->_pushWarning(WAR_MALFORMED_NULLOUT)
+	  if(defined $res{nullout} && $res{nullout} ne 'yes' && $res{nullout} ne 'no');
+
 	if(defined $res{index} && $res{index} !~ m/^-?\d+$/){
-		push @{$self->{warnings}}, WAR_MALFORMED_INDEX;
+  	$self->_pushWarning(WAR_MALFORMED_INDEX);
 		$res{index} = undef;
 	}
 
@@ -295,14 +370,14 @@ sub _makeList($;)
 
   foreach $list (@src){
     if(!hasValue $list){
-      push @{$self->{warnings}}, WAR_UNDEFINED_LIST;
+      $self->_pushWarning(WAR_UNDEFINED_LIST);
       next;
     }
     if($list !~ m/(\w*?):(.*)/){
-      push @{$self->{warnings}}, WAR_MALFORMED_LIST;
+      $self->_pushWarning(WAR_MALFORMED_LIST);
       next;
     }
-    
+
     ($const, $vals) = ($1, $2);
     $vals =~ s/\\,/\0/; $vals =~ s/\\(.)/$1/;
     $res{$const} = [split(/,/, $vals)];
@@ -331,7 +406,7 @@ sub _replaceConst($$$;)
     $inx = ($index > scalar @{$const->{$key}}-1) ?
       $index % scalar @{$const->{$key}} : $index;
 
-    #La subtilité est que le remplacement ne doit pas ce 
+    #La subtilité est que le remplacement ne doit pas ce
     #faire dans les sous-tags.
     for($start = $end = 0; $start < length $src; $start = $end, $tag = ''){
       pos($src) = $start;
@@ -366,16 +441,22 @@ sub _getPosEnd($$;)
 {
   my ($self, $src, $start) = (@_);
   my ($count, $pos, $tag);
-  
+
   pos($src) = $start;
   for($count = 1; $count > 0 && $src =~ m/(<[^>]*?\Q$self->{TAGNAME}\E[^>]*?>)/g; ){
     ($pos, $tag) = (pos($src), $1);
-    $count = ($tag =~ m/^<\//) ? --$count : ++$count
-      if($tag !~ m/\/>$/);
+    if($tag !~ m/\/>$/){
+      if($tag =~ m/^<\//){
+        --$count;
+      }
+      else{
+        ++$count;
+      }
+    }
   }
 
-  if($count != 0){
-    $self->{error} = ERR_UNMATCHED_CLOSING;
+  if($count > 0){
+    $self->_setError(ERR_UNMATCHED_CLOSING);
     return (length $src, $src);
   }
   return ($pos, $tag);
@@ -424,10 +505,10 @@ sub _replaceID($;)
   return $src;
 }
 
-# Va chercher les données associé au nom en tenant compte de sont nom. 
-#	Les index par défault dont gardé en stack. Par example, "hashref.nestedhashref", 
-# hashref prend l'index en backup s'il est présent.
-# @param $node Référence sur le noeud.
+# Va chercher les données associé au nom en tenant compte de sont nom.
+#	Les index par défault dont gardé en stack. Par example, "hashref.nestedhashref",
+# hashref prend l'index en backup s'il est présent et non spécifié (hashref[i]).
+# @param $key Nom de la clef.
 # @return Une référence sur le array ou undef si non trouvé.
 sub _fetchAssociatedData($;)
 {
@@ -440,26 +521,41 @@ sub _fetchAssociatedData($;)
   my ($bck, $inx);
   my $seq = 1;   #si le nom est dans la sequence de boucle (a <=> a.b)
 
-  for(my $i = 0; defined $data && $i < scalar @selectors -1; $i++){
-    $bck = $self->{inxbck}[$i];
-    @Kselectors = split(/\./, $bck->{name}) if(defined $bck);
-
-    #si il y a plus de nom de backup (a.b.c) compare au nombre d'element backuper,
-    #il faut consider l'index comme etant associe au dernier nom (c).
-    if($seq && defined $Kselectors[$i] && $selectors[$i] eq $Kselectors[$i] && $i == scalar @Kselectors -1){
-      $inx = $bck->{index};
+  for(my $i = 0; $i < scalar @selectors -1; $i++){
+    #vérifier si un index par défaut est spécifié.
+    if($selectors[$i] =~ m/^(.*)\[(\d)\]$/){
+      $selectors[$i] = $1;
+      $inx = $2;
     }
     else{
-      $inx = $self->{index};
-      $seq = 0;
+      #sinon aller chercher l'index qu'on as besoin
+      $bck = $self->{inxbck}[$i];
+      @Kselectors = split(/\./, $bck->{name}) if(defined $bck);
+
+      #si il y a plus de nom de backup (a.b.c) compare au nombre d'elements backuper,
+      #il faut consider l'index comme etant associe au dernier nom (c).
+      if($seq && defined $Kselectors[$i] && $selectors[$i] eq $Kselectors[$i] && $i == scalar @Kselectors -1){
+        $inx = $bck->{index};
+      }
+      else{
+        $inx = $self->{index};
+        $seq = 0;
+      }
     }
+
     $data = $data->{$selectors[$i]};
     last if(!defined $data);
     $data = $$data[$inx];
+    last if(!defined $data);
+
+    if(ref $data ne 'HASH'){
+      $self->_setError(ERR_MALFORMED_STRUCTURE);
+      return undef;
+    }
   }
 
   if(!defined $data || !defined ($data = $data->{$selectors[-1]})){
-    push @{$self->{warnings}}, WAR_UNDEFINED_DATA;
+    $self->_pushWarning(WAR_UNDEFINED_DATA);
     return undef;
   }
 
@@ -474,7 +570,7 @@ sub _cleanoff($;)
   my ($self, $source) = (shift, shift);
   if(defined $source && $source =~ m/<\/\Q$self->{TAGNAME}\E[^>]*?>/){
     $source =~ s/<\/\Q$self->{TAGNAME}\E[^>]*?>//gs;
-      push @{$self->{warnings}}, WAR_UNMATCHED_OPENING;
+    $self->_pushWarning(WAR_UNMATCHED_OPENING);
   }
   return $source;
 }
@@ -496,37 +592,34 @@ __END__
 
 =head1 NAME
 
-Templater - A template engine.
+Text::Templater - A template engine
 
 =head1 SYNOPSIS
 
   #!/usr/bin/perl
   use Text::Templater;
-  
+
   my $tpl = new Text::Templater($tagname);
   #Default tagname is "tpl"
-  
+
   $tpl->setSource($some_template_text);
-  
+
   #Set the data source...
   $tpl->setData({
     name => ['bob', undef, 'daniel'],
     color => ['red', 'green', 'blue'],
-    nested => 
+    nested =>
       [
         {lang => ['fr'], numeric => ['un', 'deux', 'trois', 'quatre']},
         {lang => ['en'], numeric => ['one', 'two', 'three', 'four']}
       ]
     });
-  #Or use existing objects.
-  $tpl->setData($cgi);
-  $tpl->setData($sth);
-  
+
   #Get the result.
   $result = $tpl->parse() || die $tpl->getError();
-   
+
   #if you get weird stuff,
-  #check for $tpl->getWarnings();
+  #check the $tpl->getWarnings();
 
 =head1 ABSTRACT
 
@@ -538,11 +631,11 @@ it's representation while keeping out logic as much as possible from the represe
 Templater receive the template and the data to be binded in the template.
 Then using the parse method, it return the result.
 
-One tag and 5 properties are used in a xmlish way to describe data in the template.
-Since the object use an xml tag, you can use it in your xml files while keeping them 
-well-formedness and valid.
+One tag and 4 properties are used in a xmlish way to describe data in the template.
+Since the object use an xml tag, you can use it in your xml files while keeping them
+well-formed and valid.
 
-<tpl id="x" name="key" index="0" nullout="no" list="CONST:1,2,3..." />
+<tpl id="x" name="key" nullout="no" list="CONST:1,2,3..." />
 
 
 =head2 Tag properties
@@ -557,28 +650,24 @@ well-formedness and valid.
   <othertag value="#myvalue" /> instead of
   <other-tag value="<tpl name="nom" />" />.
   A tag with the id specified will not print his result, only
-  record it for late references. Note that the second alternalive 
-  will work as well.
+  record it for late references. 
+  Note that the second alternalive will work as well.
 
 =item name="name"
 
   You can bind a specific data value to a tag using it's hash key.
   A tag without a name does not make sense.
   In the synopsis; <tpl name="color" /> eqals red.
-  If you have nested structures, you can use the notation a.b
-  <tpl name="nested.lang" /> equals fr.
-
-=item index="num"
-
-  Specify the index of the value to be binded.
-  If not specified, the current iteration is taken.
-  In the synopsis; <tpl name="color" index="1" /> eqals green.
+  Name can be joined by a point to represent nested structure.
+  Also, the index property have been moved into the name so it's possible
+  to index any element of a nested structure. "element[i]",
+  "element[i].nested[j]", "element.nested[i]".
 
 =item nullout="yes|no"
 
   If the binded value is undef or '', all the expression
   is discarded. no is taken by default. In the synopsis:
-  <tpl name="name" nullout="yes">hi</tpl> equals nothing.
+  <tpl name="name[1]" nullout="yes">hi</tpl> equals nothing.
 
 =item list="CONST:1,2,3,..."
 
@@ -604,7 +693,6 @@ of each result is used as the sole result.
 
 Creates a new Templater object.
 You can specify the tag name to be used in templates.
-No verification of the validity of name is made.
 
 =item setSource
 
@@ -614,7 +702,6 @@ The source of the object is returned.
 =item setData
 
 If a value is passed, it is set to be the data to bind.
-CGI and STH objects can be passed.
 The data of the object is returned.
 
 =item parse
@@ -628,18 +715,28 @@ Returns the error that was recorded during the last parsing.
 This method should return undef if parse return a value and
 the cause of the error if parse says undef.
 
+=item getErrorNo
+
+Returns the error number that was recorded during the last
+parsing.
+
 =item getWarnings
 
-Returns the list of the warnings that occurned in the last 
-parsing. This is the first place to look if you think you have 
+Returns the list of the warnings that occurned in the last
+parsing. This is the first place to look if you think you have
 weird or unexpected results.
+
+=item getWarningsNo
+
+Returns the list of warnings number that occured during the
+last parsing.
 
 =back
 
-=head1 CREDITS
+=head1 AUTHOR
 
-Mathieu Gagnon
+Mathieu Gagnon <gagnonm@cpan.org>
 
-This package is free software; you can redistribute it and/or modify it under the same terms as Perl itself.
+This package is free software.
 
 =cut

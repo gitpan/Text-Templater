@@ -1,34 +1,31 @@
 NAME
-    Templater - A template engine.
+    Text::Templater - A template engine
 
 SYNOPSIS
       #!/usr/bin/perl
       use Text::Templater;
-  
+
       my $tpl = new Text::Templater($tagname);
       #Default tagname is "tpl"
-  
+
       $tpl->setSource($some_template_text);
-  
+
       #Set the data source...
       $tpl->setData({
         name => ['bob', undef, 'daniel'],
         color => ['red', 'green', 'blue'],
-        nested => 
+        nested =>
           [
             {lang => ['fr'], numeric => ['un', 'deux', 'trois', 'quatre']},
             {lang => ['en'], numeric => ['one', 'two', 'three', 'four']}
           ]
         });
-      #Or use existing objects.
-      $tpl->setData($cgi);
-      $tpl->setData($sth);
-  
+
       #Get the result.
       $result = $tpl->parse() || die $tpl->getError();
-   
+
       #if you get weird stuff,
-      #check for $tpl->getWarnings();
+      #check the $tpl->getWarnings();
 
 ABSTRACT
     The objective of the Templater object is to separate data manipulation
@@ -39,11 +36,11 @@ DESCRIPTION
     Templater receive the template and the data to be binded in the
     template. Then using the parse method, it return the result.
 
-    One tag and 5 properties are used in a xmlish way to describe data in
+    One tag and 4 properties are used in a xmlish way to describe data in
     the template. Since the object use an xml tag, you can use it in your
-    xml files while keeping them well-formedness and valid.
+    xml files while keeping them well-formed and valid.
 
-    <tpl id="x" name="key" index="0" nullout="no" list="CONST:1,2,3..." />
+    <tpl id="x" name="key" nullout="no" list="CONST:1,2,3..." />
 
   Tag properties
     id="unique"
@@ -53,25 +50,22 @@ DESCRIPTION
           <othertag value="#myvalue" /> instead of
           <other-tag value="<tpl name="nom" />" />.
           A tag with the id specified will not print his result, only
-          record it for late references. Note that the second alternalive 
-          will work as well.
+          record it for late references. 
+          Note that the second alternalive will work as well.
 
     name="name"
           You can bind a specific data value to a tag using it's hash key.
           A tag without a name does not make sense.
           In the synopsis; <tpl name="color" /> eqals red.
-          If you have nested structures, you can use the notation a.b
-          <tpl name="nested.lang" /> equals fr.
-
-    index="num"
-          Specify the index of the value to be binded.
-          If not specified, the current iteration is taken.
-          In the synopsis; <tpl name="color" index="1" /> eqals green.
+          Name can be joined by a point to represent nested structure.
+          Also, the index property have been moved into the name so it's possible
+          to index any element of a nested structure. "element[i]",
+          "element[i].nested[j]", "element.nested[i]".
 
     nullout="yes|no"
           If the binded value is undef or '', all the expression
           is discarded. no is taken by default. In the synopsis:
-          <tpl name="name" nullout="yes">hi</tpl> equals nothing.
+          <tpl name="name[1]" nullout="yes">hi</tpl> equals nothing.
 
     list="CONST:1,2,3,..."
           Defines a specific constant "CONST" into the tag inner source.
@@ -86,15 +80,15 @@ DESCRIPTION
 
   Methods
     new Creates a new Templater object. You can specify the tag name to be
-        used in templates. No verification of the validity of name is made.
+        used in templates.
 
     setSource
         If a scalar is passed, it is set to be the template. The source of
         the object is returned.
 
     setData
-        If a value is passed, it is set to be the data to bind. CGI and STH
-        objects can be passed. The data of the object is returned.
+        If a value is passed, it is set to be the data to bind. The data of
+        the object is returned.
 
     parse
         Takes the template and parse the data inside using the templater
@@ -105,14 +99,20 @@ DESCRIPTION
         method should return undef if parse return a value and the cause of
         the error if parse says undef.
 
+    getErrorNo
+        Returns the error number that was recorded during the last parsing.
+
     getWarnings
         Returns the list of the warnings that occurned in the last parsing.
         This is the first place to look if you think you have weird or
         unexpected results.
 
-CREDITS
-    Mathieu Gagnon
+    getWarningsNo
+        Returns the list of warnings number that occured during the last
+        parsing.
 
-    This package is free software; you can redistribute it and/or modify it
-    under the same terms as Perl itself.
+AUTHOR
+    Mathieu Gagnon <gagnonm@cpan.org>
+
+    This package is free software.
 

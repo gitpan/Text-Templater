@@ -1,11 +1,13 @@
 --- #YAML:1.0
 name: Text-Templater
-version: 1.3
-author: ~
-abstract: A template engine.
-license: perl
+version: 1.4
+author:
+  - Mathieu Gagnon <gagnonm@cpan.org>
+  - This package is free software.
+abstract: A template engine
+license: gpl
 provides:
   Text::Templater:
     file: lib/Text/Templater.pm
-    version: 1.3
+    version: 1.4
 generated_by: Module::Build version 0.25

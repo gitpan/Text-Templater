@@ -34,8 +34,17 @@ our $data =
                     test => ['1', '2', '3', '4']
                   }
                 ]
+            },
+            {
+              test => ['a', 'b', 'c', 'd'],
+              sodeep =>
+                [
+                  {
+                    test => ['a', 'b', 'c', 'd']
+                  }
+                ]
             }
-          ]
+          ]         
       },
       {
         lang => ['english'],
@@ -44,8 +53,9 @@ our $data =
     ]
   };
 
-our $test = new Text::Templater();
-#our $test = new Text::Templater('c:tpl');
+
+#our $test = new Text::Templater();
+our $test = new Text::Templater($tag);
 $test->setData($data);
   
 

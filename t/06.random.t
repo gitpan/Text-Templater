@@ -2,7 +2,7 @@
 use Test;
 use Text::Templater;
 
-require 't/common.pl';
+require 't/lib/common.pl';
 
 BEGIN {plan tests => 2}
 
