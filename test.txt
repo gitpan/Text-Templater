@@ -1,3 +1,50 @@
-This is just a test:
-<tpl name="nom" nullout="no" list="CONST:1,2,3,4,5">
-  CONST) hello <tpl name="prenom" /> <tpl name="nom" />.</tpl>
+Test : id
+  <tpl id="bob" name="nom" nullout="no" list="CONST:1,2,3,4,5">CONST) <name value="#bob" />
+  </tpl>
+  
+Test : Id devrais être la première valeur de nom
+  <name value="#bob" />
+  
+Test : index 1
+  <tpl name="nom" index="1" nullout="no" list="CONST:1,2,3,4,5">CONST) <tpl name="nom" />
+  </tpl>
+
+Test : index -1
+  <tpl name="nom" index="-1" nullout="no" list="CONST:1,2,3,4,5">CONST) <tpl name="nom" />
+  </tpl>
+
+Test : index -156
+  <tpl name="nom" index="-156" nullout="no" list="CONST:1,2,3,4,5">CONST) <tpl name="nom" />
+  </tpl>
+  
+Test : index 156
+  <tpl name="nom" index="156" nullout="no" list="CONST:1,2,3,4,5">CONST) <tpl name="nom" />
+  </tpl>
+
+Test : nullout yes
+  <tpl name="nom" nullout="yes"><tpl name="nom" />
+  </tpl>
+  
+Test : nullout no
+  <tpl name="nom" nullout="no"><tpl name="nom" />
+  </tpl>
+
+Test : list
+  <tpl name="prenom" list="CONST:red,green,blue">CONST ) <tpl name="prenom" />
+  </tpl>
+
+Test : list + index
+  <tpl name="prenom" index="3" list="CONST:red\,green,green,blue">CONST ) <tpl name="prenom" />
+  </tpl>
+
+  
+Test : name undefined
+  <tpl name="asfdjkasjdfasfsa">x</tpl>
+
+Test : name case sensitive
+  <tpl name="Nom">x</tpl>
+  
+<tpl id="myvalue" name="index"> <nom index="#myvalue" /> </tpl>
+
+
+not so bad, not so bad...

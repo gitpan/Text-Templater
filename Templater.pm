@@ -2,7 +2,7 @@ package Text::Templater;
 use strict;
 use warnings;
 
-our $VERSION = 1.1;
+our $VERSION = 1.2;
 our @ISA     = ();
 
 sub new();
@@ -11,25 +11,32 @@ sub setData($);
 sub getDataCGI($;);
 sub getDataSTH($;);
 sub getSourceFILE($);
-sub parse(;$$);
+sub parse();
+sub _parse(;$$);
+sub _roundNegativeIndex($$;);
 sub _getNextNode($;);
 sub _makeList($;);
 sub _replaceConst($$$;);
 sub _getPosEnd($$;);
+sub _recordID($$;);
+sub _replaceID($;);
 
 #Constructeur de l'objet.
 #Il est possible de lui passer en parametre, un nom specifique
 #de tag à utiliser pendant la duree de l'objet.
 sub new()
 {
-  my $class = shift;
+  my ($class, $tagname) = (shift, shift);
   my $self = {
     TAGNAME    => "tpl",
     source     => '',
     data       => {},
+    ids        => {},
+    idsbck     => {},
     index      => 0,    #Index par defaut des valeurs.
     nullout    => "no", #Valeurs par defaut du parametre nullout.
     };
+  $self->{TAGNAME} = $tagname if(defined($tagname));
   return bless $self, $class;
 }
 
@@ -92,46 +99,54 @@ sub getDataSTH($;)
   return $data;
 }
 
-#Prend en parametre un nom de fichier, le lie et
-#retourne sont contenu. undef est retourne si
-#l'ouverture ou la fermeture du fichier à echoue.
-sub getSourceFILE($)
+#Front-end pour _parse
+#C'est cette méthode qui sera appelé par l'utilisateur.
+sub parse()
 {
-   my ($self, $file, $template) = (shift, shift, undef);
-   return undef unless(defined($file));
-
-   return undef unless(open(FILE, $file));
-   $template .= $_ while(<FILE>);
-   return undef unless(close(FILE));
-
-   return $template;
+  my ($self, $source) = (shift, '');
+  $source = $self->_parse();
+  $source = $self->_replaceID($source);
+  $self->{ids} = {};
+  $self->{idsbck} = {};
+  return $source;
 }
 
-#Effectue un remplacement des tags <tpl /> à l'interieur
+#Effectue un remplacement des tags <tpl> à l'interieur
 #de la source et retourne le resultat.
 #Les parametre optionel sont les suivant: la source et l'index.
 #Si les parametre ne sont pas specifier, les valeurs par defaut
 #sont prisent pour acquise.
-sub parse(;$$)
+sub _parse(;$$)
 {
   my ($self, $val, %node) = (shift, '', ());
   my $source  = defined($_[0]) ? shift : $self->{source};
   my $index   = defined($_[0]) ? shift : $self->{index};
-  return $source if($source eq '');
+  my ($i, $j);  #value index et constant index
+  return $source if(!defined($source) || $source eq '');
+  return $source if(!defined($self->{data}));
 
   while((%node = $self->_getNextNode($source)) && defined($node{tag})){
-    if(!defined($node{key})){
-      $val = ''; }
+    if(!defined($node{key}) || !defined($self->{data}->{$node{key}})){
+      $val = ''; 
+    }
     elsif(!defined($node{inner})){
       $node{index} = $index if(!defined($node{index}));
-      $val = $self->{data}->{$node{key}}[$node{index}];
+      $i = $self->_roundNegativeIndex($node{index}, scalar @{$self->{data}->{$node{key}}});
+      $val = $self->{data}->{$node{key}}[$i];
+      $self->_recordID($node{id}, $val);
     }
-    else{
+    elsif(defined($self->{data}->{$node{key}})){
       $node{index} = $self->{index} if(!defined($node{index}));
       $node{nullout} = $self->{nullout} if(!defined($node{nullout}));
-      for(my $i = $node{index}; !defined $self->{data}->{$node{key}} || $i < scalar @{$self->{data}->{$node{key}}}; $i++){
-        $val .= $self->parse($self->_replaceConst($node{inner}, $node{list}, $i), $i)
-          if($node{nullout} eq "no" || (defined($self->{data}->{$node{key}}[$i]) && $self->{data}->{$node{key}}[$i] ne ""));
+      $i = $self->_roundNegativeIndex($node{index}, scalar @{$self->{data}->{$node{key}}});
+      $j = 0;
+      for(; !defined $self->{data}->{$node{key}} || $i < scalar @{$self->{data}->{$node{key}}}; $i++){
+        $self->_recordID($node{id}, $self->{data}->{$node{key}}[$i]);
+        if($node{nullout} eq "no" || (defined($self->{data}->{$node{key}}[$i]) && $self->{data}->{$node{key}}[$i] ne "")){
+          $val .= $self->_parse($self->_replaceConst($node{inner}, $node{list}, $j), $i);
+          $j++;
+        }
+        $val = $self->_replaceID($val);
       }
     }
   } continue{
@@ -140,6 +155,12 @@ sub parse(;$$)
     $val = '';
   }
   return $source;
+}
+
+#Round a int inside the array limit.
+sub _roundNegativeIndex($$;){
+  my ($self, $i, $length) = (shift, shift, shift);
+  return ($i < 0) ? (-$i > $length) ? 0 : $i + $length : $i;
 }
 
 #Recoit un template et retourne le prochain tag trouve.
@@ -160,6 +181,7 @@ sub _getNextNode($;)
     $res{inner} =~ s/^\Q$tag\E(.*)\Q$tagend\E$/$1/s;
   }
 
+  $res{id}      = $1 if($res{tag} =~ m/^<[^>]*?id="(.*?)"[^>]*?>/);
   $res{key}     = $1 if($res{tag} =~ m/^<[^>]*?name="(.*?)"[^>]*?>/);
   $res{nullout} = $1 if($res{tag} =~ m/^<[^>]*?nullout="(.*?)"[^>]*?>/);
   $res{index}   = $1 if($res{tag} =~ m/^<[^>]*?index="(.*?)"[^>]*?>/);
@@ -178,11 +200,14 @@ sub _makeList($;)
   my ($self, @src, %res) = (shift, @_, ());
   my ($const, $vals, $list);
   foreach $list (@src){
-    if($list =~ m/(.*?):(.*)/){
+    if($list =~ m/(\w*?):(.*)/){
       ($const, $vals) = ($1, $2);
       $vals =~ s/\\,/\0/; $vals =~ s/\\(.)/$1/;
       $res{$const} = [split(/,/, $vals)];
       map { s/\0/,/g; s/^\s*//g; s/\s*$//g; } @{$res{$const}};
+    }
+    else{
+      warn "list attribute malformed : $list";
     }
   }
   return %res;
@@ -215,7 +240,7 @@ sub _replaceConst($$$;)
 
       ($end, $tmp) = ($tag =~ m/\/>$/) ?
         ($end + length $tag, '') : $self->_getPosEnd($src, $pos)
-          if($tag ne '');
+          if(defined($tag) && $tag ne '');
     }
   }
   return $src;
@@ -236,39 +261,76 @@ sub _getPosEnd($$;)
       if($tag !~ m/\/>$/);
   }
 
-  die "Unmatched closing tag in :\n$src" if($count != 0);
+  die "Unmatched closing tag for :\n$src" if($count != 0);
   return ($pos, $tag);
 }
 
+#Effectue un enregistrement à travers $self->ids et 
+#$self->idsbck.
+sub _recordID($$;)
+{
+  my ($self, $id, $value) = (@_);
+  return if(!defined($id));
+  $value = '' if(!defined($value));
+
+  if(!defined($self->{ids}->{$id})){
+    $self->{ids}->{$id} = $value;
+  }
+  else{
+    if(!defined($self->{idsbck}->{$id})){
+      $self->{idsbck}->{$id} = $self->{ids}->{$id};
+    }
+    $self->{ids}->{$id} = $value;
+  }
+}
+
+#Replace every id that have been recorded with binded 
+#value in the src. After replaceID is done, the backup 
+#ids are copied back in the ids.
+sub _replaceID($;)
+{
+  my ($self, $src) = (@_);
+  foreach my $key (keys %{$self->{ids}}){
+    $src =~ s/(<[^>]*?=")#\Q$key\E("[^>]*?>)/$1$self->{ids}->{$key}$2/;
+    if(defined($self->{idsbck}->{$key})){
+      $self->{ids}->{$key} = $self->{idsbck}->{$key};
+      $self->{idsbck}->{$key} = undef;
+    }
+  }
+  return $src;
+}
 
 
 1;
 __END__
 
+
 =pod
 
 =head1 NAME
 
-Templater - Parse data into a template.
+Templater - Parse data inside a template.
 
 =head1 SYNOPSIS
 
    #!/usr/bin/perl
    use Text::Templater;
 
-   my $tpl = new Text::Templater();
+   my $tpl = new Text::Templater($tagname); 
+   #Default tagname is "tpl"
 
-   $tpl->setSource($sometemplate);
-   $tpl->setSource($tpl->getSourceFILE("myfile"));
+   $tpl->setSource($some_template_text);
 
-   $tpl->setData({                  # Set the data source.
+   #Set the data source...
+   $tpl->setData({                
       name => ['bob', undef, 'daniel'],
       color => ['red', 'green', 'blue'],
       });
-   $tpl->setData($cgi);             # Or use existing objects.
+   #Or use existing objects.
+   $tpl->setData($cgi);           
    $tpl->setData($sth);
 
-   print $tpl->parse();             # Get the result.
+   print $tpl->parse();  #Get the result.
 
 
 =head1 ABSTRACT
@@ -281,14 +343,25 @@ it's representation while keeping out logic as much as possible from the represe
 Templater receive the template and the data to be binded in the template.
 Then using the parse method, it return the result.
 
-One tag and 4 properties are defined in a xml'ish way to describe data in the template.
+One tag and 5 properties are defined in a xmlish way to describe data in the template.
+Internaly regular expressions are used instead of a xml parser, so it can be used with any kind of text files.
+Still, you can also use it in your xml while keeping their well-formedness and valitiy of the document.
 
-<tpl name="key" index="0" nullout="no" list="CONST:1,2,3..." />
+<tpl id="x" name="key" index="0" nullout="no" list="CONST:1,2,3..." />
 
 
 =head2 Tag properties
 
 =over
+
+=item id="unique"
+  
+  You can specify the id of an element to make late reference to it.
+  This can be used for not breaking the well-formedness of a xml
+  document. You could write <tpl id="myvalue" name="nom" /> 
+  <othertag value="#myvalue" /> instead of 
+  <other-tag value="<tpl name="nom" />" />. 
+  Note that the second alternalive will work as well.
 
 =item name="name"
 
@@ -305,13 +378,13 @@ One tag and 4 properties are defined in a xml'ish way to describe data in the te
 =item nullout="yes|no"
 
   If the binded value is undef or '', all the expression
-  is discarded. no is taken by default.
-  In the synopsis; <tpl name="name" index="1" nullout="yes">hi</tpl> equals nothing.
+  is discarded. no is taken by default. In the synopsis: 
+  <tpl name="name" nullout="yes">hi</tpl> equals nothing.
 
 =item list="CONST:1,2,3,..."
 
   Defines a specific constant "CONST" into the tag inner source.
-  The value of CONST will alternativly be 1, 2, 3, 1, 2, ...
+  The value of CONST will alternativly be 1,2,3,1,2,etc
   The backslash is used as a dummy quote character.
   But no, you can't \u or \b :-)
 
@@ -332,6 +405,8 @@ of each result is used as the sole result.
 =item new
 
 Creates a new Templater object.
+You can specify the tag name to be used in templates.
+No verification of the validity of name is made.
 
 =item setSource
 
@@ -344,20 +419,6 @@ If a value is passed, it is set to be the data to bind.
 CGI and STH objects can be passed.
 The data of the object is returned.
 
-=item getDataCGI
-
-Return the converted cgi given in argument into the
-data structure used by the object.
-
-=item getDataSTH
-
-Return the converted sth given in argument into the
-data structure used by the object.
-
-=item getSourceFILE
-
-This simple utility method is used to read a file.
-
 =item parse
 
 Takes the template and parse the data inside using the
@@ -365,14 +426,11 @@ templater tags. The parsed template is returned.
 
 =back
 
+
 =head1 CREDITS
 
-Mathieu Gagnon, (c) 2004
+Mathieu Gagnon, (c) 2005
 
 This package is free software; you can redistribute it and/or modify it under the same terms as Perl itself.
-
-=head1 SEE ALSO
-
-L<Text::Template>, L<HTML::Template>
 
 =cut

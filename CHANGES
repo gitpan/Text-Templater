@@ -1,0 +1,19 @@
+
+1.2
+Changes done was primarly simple bug fix and added support for integration 
+inside xml documents. 
+
+- Removed getSourceFILE method
+  Sorry but the method had nothing to do there.
+
+- Bug fix with negative value of index property
+  If you specify negative value greater than the values array set, all the array is displayed.
+
+- The id property was added
+
+- Bug fix with list in combination with index and nullout
+  The bug was that the list constant fallowed the index. 
+  So list="CONSTANT:1,2" index="1" made CONSTANT == 2.
+
+1.1
+First CPAN release

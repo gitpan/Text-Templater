@@ -1,8 +1,10 @@
 #!/usr/bin/perl
 use Text::Templater;
+#use Templater;
+
 #use Templater::HTML;
-use Benchmark;
-use CGI;
+#use Benchmark;
+#use CGI;
 #use DBI;
 
 #my $dbh = DBI->connect('DBI:mysql:test', 'test', 'test');
@@ -11,12 +13,12 @@ use CGI;
 #$sth->execute();
 
 my $data = {       #Faked cgi
-  size    => ['2'],
+  index    => ['2'],
   nom     => ['Bob', undef, 'Roger', 'Ponpon'],
   prenom  => ['Baker', 'CONST', 'Dupont', 'Jacques', 'Yves', '666', 'Number of heaven'],
   saisons => ['Hiver', 'Automne', 'Été', 'Printemps'],
   };
-my $cgi = new CGI($data);
+#my $cgi = new CGI($data);
 
 #==============================================================================
 
@@ -32,10 +34,24 @@ timethis($count, sub {
 
 #print "$count loops of other code took:",timestr($t),"\n";
 
-my $test = new Text::Templater();
-$test->setSource($test->getSourceFILE("test.txt"));
-$test->setData($cgi);
+my $test = new Text::Templater("tpl");
+$test->setSource(getSourceFILE("test.txt"));
+$test->setData($data);
 print $test->parse();
 
 #print $test->parseWith($test->getSourceFILE("template.txt"), $sth);
 
+#Prend en parametre un nom de fichier, le lie et
+#retourne sont contenu. undef est retourne si
+#l'ouverture ou la fermeture du fichier à echoue.
+sub getSourceFILE($)
+{
+   my ($file, $template) = (shift, shift);
+   return undef unless(defined($file));
+
+   return undef unless(open(FILE, $file));
+   $template .= $_ while(<FILE>);
+   return undef unless(close(FILE));
+
+   return $template;
+}
