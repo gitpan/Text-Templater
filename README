@@ -1,0 +1,98 @@
+NAME
+    Templater - Parse data into a template.
+
+SYNOPSIS
+       #!/usr/bin/perl
+       use Text::Templater;
+
+       my $tpl = new Text::Templater();
+
+       $tpl->setSource($sometemplate);
+       $tpl->setSource($tpl->getSourceFILE("myfile"));
+
+       $tpl->setData({                  # Set the data source.
+          name => ['bob', undef, 'daniel'],
+          color => ['red', 'green', 'blue'],
+          });
+       $tpl->setData($cgi);             # Or use existing objects.
+       $tpl->setData($sth);
+
+       print $tpl->parse();             # Get the result.
+
+ABSTRACT
+    The objective of the Templater object is to separate data manipulation
+    from it's representation while keeping out logic as much as possible
+    from the representation side.
+
+DESCRIPTION
+    Templater receive the template and the data to be binded in the
+    template. Then using the parse method, it return the result.
+
+    One tag and 4 properties are defined in a xml'ish way to describe data
+    in the template.
+
+    <tpl name="key" index="0" nullout="no" list="CONST:1,2,3..." />
+
+  Tag properties
+    name="name"
+          You can bind a specific data value to a tag using it's hash key.
+          A tag without a name does not make sense.
+          In the synopsis; <tpl name="color" /> eqals red.
+
+    index="num"
+          Specify the index of the value to be binded.
+          If not specified, the current iteration is taken.
+          In the synopsis; <tpl name="color" index="1" /> eqals green.
+
+    nullout="yes|no"
+          If the binded value is undef or '', all the expression
+          is discarded. no is taken by default.
+          In the synopsis; <tpl name="name" index="1" nullout="yes">hi</tpl> equals nothing.
+
+    list="CONST:1,2,3,..."
+          Defines a specific constant "CONST" into the tag inner source.
+          The value of CONST will alternativly be 1, 2, 3, 1, 2, ...
+          The backslash is used as a dummy quote character.
+          But no, you can't \u or \b :-)
+
+  Tag forms
+    The templater tag can be written as: <tpl /> or <tpl></tpl>. The first
+    form will replace the tag with the corresponding binded data. The second
+    form will loop each value of the binded data; the concatenation of each
+    result is used as the sole result.
+
+  Methods
+    new Creates a new Templater object.
+
+    setSource
+        If a scalar is passed, it is set to be the template. The source of
+        the object is returned.
+
+    setData
+        If a value is passed, it is set to be the data to bind. CGI and STH
+        objects can be passed. The data of the object is returned.
+
+    getDataCGI
+        Return the converted cgi given in argument into the data structure
+        used by the object.
+
+    getDataSTH
+        Return the converted sth given in argument into the data structure
+        used by the object.
+
+    getSourceFILE
+        This simple utility method is used to read a file.
+
+    parse
+        Takes the template and parse the data inside using the templater
+        tags. The parsed template is returned.
+
+CREDITS
+    Mathieu Gagnon, (c) 2004
+
+    This package is free software; you can redistribute it and/or modify it
+    under the same terms as Perl itself.
+
+SEE ALSO
+    Text::Template, HTML::Template
+
